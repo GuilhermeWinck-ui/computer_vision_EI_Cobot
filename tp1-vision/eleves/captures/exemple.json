@@ -1,0 +1,17 @@
+{
+  "width": 848,
+  "height": 480,
+  "fx": 447.0,
+  "fy": 447.0,
+  "ppx": 424.0,
+  "ppy": 240.0,
+  "dist": [
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "depth_scale": 0.0001,
+  "source": "exemple synthétique (photo + marqueur incrusté + profondeur calculée)"
+}
