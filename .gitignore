@@ -3,6 +3,11 @@ beam/data
 .ropeproject/
 .zed/
 __marimo__/
+mes_reponses.json
+mes_reponses.py
+mes_reponses.py.tmp
+dist/
+.DS_Store
 
 ##################################################
 # LATEX
@@ -36,6 +41,7 @@ __pycache__/
 *$py.class
 *.npz
 *.pkl
+*.pyc
 
 # C extensions
 *.so

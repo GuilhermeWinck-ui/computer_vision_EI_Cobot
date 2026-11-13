@@ -34,7 +34,7 @@ def main():
 
     tmp = Path(tempfile.mkdtemp(prefix="e2e_node_"))
     work = tmp / "tp1"
-    shutil.copytree(args.target, work, ignore=shutil.ignore_patterns("__pycache__", "mes_reponses.json"))
+    shutil.copytree(args.target, work, ignore=shutil.ignore_patterns("__pycache__", "mes_reponses.*"))
     if args.captures:
         shutil.copytree(args.captures, work / "captures", dirs_exist_ok=True)
     env = {**os.environ}

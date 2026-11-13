@@ -13,6 +13,7 @@ def _():
     import time
 
     import base64
+    import glob
 
     import cv2
     import marimo as _marimo
@@ -48,8 +49,21 @@ def _():
 
     mo = _Mo()
 
-    HERE = os.path.dirname(os.path.abspath(__file__))        # notebook/ : ce fichier, exercices.py, checks.py, mes_reponses.json
-    ROOT = os.path.dirname(HERE)                             # dossier du TP : ma_vision.py, camera_utils.py, captures/, vision_ref
+    try:                                                      # dossier de ce notebook (marimo local ou molab)
+        HERE = str(_marimo.notebook_dir())
+    except Exception:
+        HERE = os.path.dirname(os.path.abspath(__file__))
+    # checks.py : on prend le plus proche de la racine, où qu'il soit (sous-dossier `notebook/` en local, à plat en ligne)
+    _found = glob.glob(os.path.join(HERE, "**", "checks.py"), recursive=True)
+    if not _found:
+        raise FileNotFoundError(f"checks.py introuvable sous {HERE} : {os.listdir(HERE)}")
+    HERE = os.path.dirname(min(_found, key=len))
+    # dossier du TP : le parent si le notebook est dans `notebook/` ET que le parent contient ma_vision.py (version locale),
+    # sinon le même dossier (version à plat, en ligne)
+    _parent = os.path.dirname(HERE)
+    ROOT = _parent if os.path.basename(HERE) == "notebook" and os.path.exists(os.path.join(_parent, "ma_vision.py")) else HERE
+    # pas de ma_vision.py à côté = version EN LIGNE : l'export se fait alors par téléchargement
+    ONLINE = not os.path.exists(os.path.join(ROOT, "ma_vision.py"))
     CAPTURES = os.path.join(ROOT, "captures")
     os.makedirs(CAPTURES, exist_ok=True)
     DEFAULT_IMAGE = os.path.join(CAPTURES, "exemple.png")
@@ -66,6 +80,7 @@ def _():
         CAPTURES,
         DEFAULT_IMAGE,
         HERE,
+        ONLINE,
         ROOT,
         checks,
         cv2,
@@ -463,11 +478,13 @@ def _(cv2, mo):
 @app.cell(hide_code=True)
 def _(HERE, ROOT, block, checks, cv2, exercices, json, mo, np, os, time, vision_ref):
     # ------------------------------------------------------------ mécanique des exercices de code
+    import ast
+    import pprint
     import textwrap
 
     MA_VISION = os.path.join(ROOT, "ma_vision.py")
 
-    # ---- sauvegarde automatique de votre travail (dans mes_reponses.json, à côté de vos réponses)
+    # ---- sauvegarde automatique de votre travail (dans mes_reponses.py, à côté de vos réponses)
     #      image active, pixel, zone, réglages, et code de vos fonctions : tout est retrouvé au redémarrage
     def _etat_all():
         return _snip_saved().get("__etat__", {})
@@ -481,11 +498,7 @@ def _(HERE, ROOT, block, checks, cv2, exercices, json, mo, np, os, time, vision_
         if e.get(key) == value:
             return
         e[key] = value
-        try:
-            with open(SNIP_FILE, "w", encoding="utf-8") as f:
-                json.dump(d, f, ensure_ascii=False, indent=1)
-        except OSError:
-            pass
+        _snip_write(d)
 
     def ex_editor(name):
         """Éditeur de code : votre dernier brouillon (sauvegardé automatiquement), sinon votre dernière
@@ -493,12 +506,15 @@ def _(HERE, ROOT, block, checks, cv2, exercices, json, mo, np, os, time, vision_
         _d = etat_get("fn:" + name)
         _code = None
         if isinstance(_d, dict) and _d.get("code"):
-            try:
-                _fresh = (not os.path.exists(MA_VISION)) or os.path.getmtime(MA_VISION) <= float(_d.get("t", 0))
+            _code = _d["code"]                  # votre brouillon sauvegardé
+            try:                                # ma_vision.py modifié à la main depuis : sa version l'emporte,
+                if os.path.exists(MA_VISION) and os.path.getmtime(MA_VISION) > float(_d.get("t", 0)):
+                    with open(MA_VISION, encoding="utf-8") as _f:
+                        _fb = exercices.read_block(_f.read(), name)
+                    if _fb and "raise NotImplementedError" not in _fb:      # ...mais seulement si c'est du vrai code,
+                        _code = None                                         # jamais un énoncé vide qui écraserait votre travail
             except OSError:
-                _fresh = True
-            if _fresh:                      # ma_vision.py modifié plus récemment (à la main) : il l'emporte
-                _code = _d["code"]
+                pass
         if _code is None:
             _code = exercices.load_code(name, MA_VISION)
         return mo.ui.code_editor(value=_code, language="python",
@@ -535,7 +551,9 @@ def _(HERE, ROOT, block, checks, cv2, exercices, json, mo, np, os, time, vision_
     def evaluate(name, code, extra_ns=None):
         """Exécute le code de l'étudiant et lance les tests. `used` = sa fonction si elle est validée, sinon la référence."""
         _d = etat_get("fn:" + name)
-        if not (isinstance(_d, dict) and _d.get("code") == code):
+        _old = _d.get("code") if isinstance(_d, dict) else None
+        _vide = "raise NotImplementedError" in code and bool(_old) and "raise NotImplementedError" not in _old
+        if _old != code and not _vide:         # on n'écrase jamais un brouillon écrit par un énoncé vide
             etat_set("fn:" + name, {"code": code, "t": time.time()})
         fn, err = _run_student(name, code, extra_ns)
         res = checks.CHECKS[name](fn) if fn is not None else []
@@ -572,23 +590,42 @@ def _(HERE, ROOT, block, checks, cv2, exercices, json, mo, np, os, time, vision_
 
 
     # ---- petits exercices : quelques lignes écrites sur les variables du notebook
-    SNIP_FILE = os.path.join(HERE, "mes_reponses.json")
+    # Sauvegarde dans `mes_reponses.py` : un simple dictionnaire écrit en Python, relu SANS l'exécuter (ast.literal_eval).
+    # (un .py survit à la fermeture de molab, pas un .json). Un ancien mes_reponses.json est relu s'il n'y a pas encore de .py.
+    SNIP_FILE = os.path.join(HERE, "mes_reponses.py")
+    _LEGACY_JSON = os.path.join(HERE, "mes_reponses.json")
 
     def _snip_saved():
         try:
             with open(SNIP_FILE, encoding="utf-8") as f:
+                for _n in ast.parse(f.read()).body:
+                    if isinstance(_n, ast.Assign) and any(getattr(_t, "id", None) == "REPONSES" for _t in _n.targets):
+                        return ast.literal_eval(_n.value)
+        except Exception:
+            pass
+        try:
+            with open(_LEGACY_JSON, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
 
+    def _snip_write(d):
+        """Écrit tout le dictionnaire (écriture atomique : un plantage ne laisse jamais un fichier tronqué)."""
+        try:
+            d = json.loads(json.dumps(d, default=lambda o: o.item() if hasattr(o, "item") else str(o)))   # types simples seulement
+            _txt = ('"""Sauvegarde automatique de votre travail (écrite par le notebook : ne la modifiez pas à la main)."""\n\n'
+                    "REPONSES = " + pprint.pformat(d, width=110, sort_dicts=False) + "\n")
+            _tmp = SNIP_FILE + ".tmp"
+            with open(_tmp, "w", encoding="utf-8") as f:
+                f.write(_txt)
+            os.replace(_tmp, SNIP_FILE)
+        except OSError:
+            pass
+
     def _snip_save(sid, code):
         d = _snip_saved()
         d[sid] = code
-        try:
-            with open(SNIP_FILE, "w", encoding="utf-8") as f:
-                json.dump(d, f, ensure_ascii=False, indent=1)
-        except OSError:
-            pass
+        _snip_write(d)
 
     def sn_editor(sid):
         """Éditeur d'un petit exercice (reprend votre dernière réponse enregistrée)."""
@@ -676,6 +713,7 @@ def _(HERE, ROOT, block, checks, cv2, exercices, json, mo, np, os, time, vision_
 
     return (
         MA_VISION,
+        SNIP_FILE,
         etat_get,
         etat_set,
         evaluate,
@@ -776,14 +814,14 @@ def _(browser, get_path, mo, reset_btn, set_path):
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, rs):
     save_name = mo.ui.text(value="", placeholder="optionnel, ex. mon_objet_01", label="Nom de la capture")
-    save_name
+    save_name if rs is not None else mo.md("ℹ️ *Prise de photo indisponible ici (pas de caméra RealSense) : utilisez les images du dossier `captures/`.*")
     return (save_name,)
 
 
 @app.cell(hide_code=True)
-def _(capture_from_camera, mo, save_frame, save_name, set_msg, set_path):
+def _(capture_from_camera, mo, rs, save_frame, save_name, set_msg, set_path):
     def _on_capture(_):
         _frame, _err = capture_from_camera()
         if _frame is None:
@@ -798,7 +836,7 @@ def _(capture_from_camera, mo, save_frame, save_name, set_msg, set_path):
         cam_btn,
         mo.md("Une fenêtre OpenCV s'ouvre : **ESPACE** = capturer, **ESC** = annuler. "
               "La photo est **enregistrée dans `captures/`** et devient l'image utilisée."),
-    ], justify="start", align="center")
+    ], justify="start", align="center") if rs is not None else None
     return
 
 
@@ -844,6 +882,21 @@ def _(fr, frame, mo, to_rgb):
         | Provenance de K | {frame['k_source']} |
         """),
     ], justify="start", gap=2)
+    return
+
+
+@app.cell(hide_code=True)
+def _(MA_VISION, ONLINE, SNIP_FILE, etat_get, exercices, mo, os):
+    # petit contrôle de la sauvegarde automatique : où elle est lue, et ce qu'elle contient
+    _noms = [e["name"] for e in exercices.EXERCICES]
+    _brouillons = [n for n in _noms if isinstance(etat_get("fn:" + n), dict) and etat_get("fn:" + n).get("code")]
+    mo.accordion({"💾 Sauvegarde automatique de votre travail": mo.md(
+        f"- Fichier lu : `{SNIP_FILE}` ({'existe' if os.path.exists(SNIP_FILE) else '**absent**'})\n"
+        f"- Brouillons de fonctions retrouvés : **{len(_brouillons)}/{len(_noms)}**"
+        + (f" ({', '.join(_brouillons)})" if _brouillons else "") + "\n"
+        + ("- Version **en ligne** : l'export se fait par **téléchargement** de `ma_vision.py` (fin du notebook)." if ONLINE else
+           f"- Module exporté : `{MA_VISION}` ({'existe' if os.path.exists(MA_VISION) else '**absent**'})")
+    )})
     return
 
 
@@ -3052,6 +3105,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
+    ONLINE,
     block,
     ev_cen,
     ev_clean,
@@ -3062,6 +3116,7 @@ def _(
     ev_mp,
     ev_od,
     ev_pf,
+    exercices,
     get_exp,
     mo,
 ):
@@ -3069,14 +3124,23 @@ def _(
     _evs = [ev_hsv, ev_clean, ev_fo, ev_cen, ev_od, ev_dp, ev_pf, ev_da, ev_mp]
     _ok = [e["name"] for e in _evs if e["good"]]
     _ko = [e["name"] for e in _evs if not e["good"]]
+    if ONLINE:      # version en ligne : on télécharge le fichier (il n'y a pas de dossier de TP où l'écrire)
+        _texte = exercices.build_module({e["name"]: e["code"] for e in _evs if e["good"]}, None)
+        _action = mo.download(data=_texte.encode("utf-8"), filename="ma_vision.py", mimetype="text/x-python",
+                              label="⬇️ Télécharger ma_vision.py")
+        _consigne = ("Les fonctions **validées** sont placées dans un fichier `ma_vision.py` à **télécharger**. "
+                     "Copiez-le dans le dossier du TP sur votre ordinateur (à côté de `camera_utils.py`) : `live/vision_node.py` l'utilisera.")
+    else:
+        _action = export_btn
+        _consigne = "Les fonctions **validées** sont écrites dans `ma_vision.py`, dans le dossier du TP (un niveau au-dessus de ce notebook) ; `live/vision_node.py` les utilisera."
     mo.vstack([
         mo.md("---\n# 💾 Exporter votre module"),
         block(
             "coder", "Exporter votre module",
-            "Les fonctions **validées** sont écrites dans `ma_vision.py`, dans le dossier du TP (un niveau au-dessus de ce notebook) ; `live/vision_node.py` les utilisera.",
+            _consigne,
             mo.md("- Prêtes à exporter : " + (", ".join(f"`{n}`" for n in _ok) or "aucune") + "\n"
                   + "- Pas encore validées (non exportées) : " + (", ".join(f"`{n}`" for n in _ko) or "aucune")),
-            export_btn,
+            _action,
             mo.md(get_exp()) if get_exp() else mo.md(""),
         ),
     ])
@@ -3086,6 +3150,7 @@ def _(
 @app.cell(hide_code=True)
 def _(
     MA_VISION,
+    ONLINE,
     ev_cen,
     ev_clean,
     ev_da,
@@ -3100,7 +3165,7 @@ def _(
     mo,
     set_exp,
 ):
-    mo.stop(not export_btn.value)
+    mo.stop(ONLINE or not export_btn.value)
     try:
         with open(MA_VISION, encoding="utf-8") as _f:
             _existing = _f.read()

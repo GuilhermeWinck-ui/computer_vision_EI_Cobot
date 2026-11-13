@@ -15,7 +15,7 @@ eleves/
 ├── ma_vision.py          gabarit : 9 énoncés, JAMAIS rempli ici (le build vérifie qu'il n'y a aucune solution)
 ├── camera_utils.py       partagé (notebook et nœud)
 ├── captures/             exemple.png, exemple_depth.npy, exemple.json  (à copier ici : non fournis dans cette archive)
-├── notebook/             tp1_vision.py  exercices.py  checks.py   (+ mes_reponses.json créé au lancement)
+├── notebook/             tp1_vision.py  exercices.py  checks.py   (+ mes_reponses.py créé au lancement)
 └── live/                 vision_node.py  zmq_utils.py  zmq_test_pub.py  zmq_test_sub.py
 prof/
 ├── vision_ref.py         solutions de référence (+ process_frame)

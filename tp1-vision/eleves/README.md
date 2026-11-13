@@ -5,7 +5,7 @@ tp1_vision/
 ├── ma_vision.py       VOTRE module : le notebook y exporte vos fonctions validées
 ├── camera_utils.py    lecture de la caméra D405 (fourni)
 ├── captures/          images (exemple.png + profondeur + intrinsèques) et vos propres photos
-├── notebook/          le TP guidé : tp1_vision.py  (+ exercices.py, checks.py ; vos réponses : mes_reponses.json)
+├── notebook/          le TP guidé : tp1_vision.py  (+ exercices.py, checks.py ; vos réponses : mes_reponses.py)
 └── live/              l'application : vision_node.py  + les tests ZeroMQ (zmq_test_pub.py, zmq_test_sub.py)
 ```
 
@@ -20,7 +20,7 @@ Toutes les commandes se lancent **depuis le dossier `tp1_vision/`**.
 
 - Image par défaut : `captures/exemple.png` (+ profondeur `exemple_depth.npy`, intrinsèques `exemple.json`).
 - Section « Source » : saisir un chemin, parcourir les fichiers, ou capturer depuis la D405 (enregistrée dans `captures/`).
-- Votre travail est sauvegardé automatiquement dans `notebook/mes_reponses.json` : image, pixel, zone, réglages et code de vos fonctions. Au redémarrage, vous retrouvez tout.
+- Votre travail est sauvegardé automatiquement dans `notebook/mes_reponses.py` : image, pixel, zone, réglages et code de vos fonctions. Au redémarrage, vous retrouvez tout.
 
 ## Le notebook
 

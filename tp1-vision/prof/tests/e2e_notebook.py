@@ -8,9 +8,10 @@ résultats cachés (🔒) se débloquent, clique sur « Exporter », puis lance
 
     python prof/tests/e2e_notebook.py                       # teste eleves/
     python prof/tests/e2e_notebook.py --target dist/tp1_vision   # teste le dossier généré
+    python prof/tests/e2e_notebook.py --target dist/tp1_online   # teste la version en ligne (à plat, export par téléchargement)
     python prof/tests/e2e_notebook.py --captures /chemin/vers/captures   # si eleves/captures/exemple.* manque
 
-Le test travaille sur une COPIE temporaire : eleves/ma_vision.py et mes_reponses.json ne sont pas touchés.
+Le test travaille sur une COPIE temporaire : eleves/ma_vision.py et mes_reponses.py ne sont pas touchés.
 Prérequis : pip install playwright && playwright install chromium
 """
 import argparse
@@ -76,15 +77,18 @@ def main():
     sol = solutions(ref)
     tmp = Path(tempfile.mkdtemp(prefix="e2e_nb_"))
     work = tmp / "tp1"
-    shutil.copytree(args.target, work, ignore=shutil.ignore_patterns("__pycache__", "mes_reponses.json"))
+    shutil.copytree(args.target, work, ignore=shutil.ignore_patterns("__pycache__", "mes_reponses.*"))
     if args.captures:
         shutil.copytree(args.captures, work / "captures", dirs_exist_ok=True)
     if not (work / "captures" / "exemple.png").exists():
         sys.exit("❌ captures/exemple.png introuvable : utilisez --captures")
+    online = (work / "notebook.py").exists()                       # version en ligne : fichiers à plat
+    nb_path = "notebook.py" if online else "notebook/tp1_vision.py"
+    checks_path = "checks.py" if online else "notebook/checks.py"
     env = {**os.environ}
     if not (work / "vision_ref.py").exists():                      # mode développement : source de la référence
         env["PYTHONPATH"] = str(PROF) + os.pathsep + env.get("PYTHONPATH", "")
-    srv = subprocess.Popen([sys.executable, "-m", "marimo", "run", "notebook/tp1_vision.py", "--headless",
+    srv = subprocess.Popen([sys.executable, "-m", "marimo", "run", nb_path, "--headless",
                             "--no-token", "--port", str(args.port)], cwd=work, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     ok = True
@@ -112,17 +116,25 @@ def main():
                 print(f"  éditeur {i:2d} · verrous {locks():2d} · erreurs {err} · partiels {part}")
                 ok &= (err == 0 and part == 0)
             ok &= locks() == 0
-            btn = pg.get_by_role("button", name="💾 Exporter dans ma_vision.py")
-            btn.scroll_into_view_if_needed()
-            btn.click()
-            pg.wait_for_timeout(3000)
-            exported = count("mis à jour") > 0
+            if online:                                                  # export = téléchargement du fichier
+                btn = pg.get_by_text("Télécharger ma_vision.py").first
+                btn.scroll_into_view_if_needed()
+                with pg.expect_download(timeout=20000) as dl:
+                    btn.click()
+                dl.value.save_as(str(work / "ma_vision.py"))
+                exported = (work / "ma_vision.py").exists()
+            else:
+                btn = pg.get_by_role("button", name="💾 Exporter dans ma_vision.py")
+                btn.scroll_into_view_if_needed()
+                btn.click()
+                pg.wait_for_timeout(3000)
+                exported = count("mis à jour") > 0
             print("export :", "✅" if exported else "❌")
             ok &= exported
             b.close()
     finally:
         srv.terminate()
-    r = subprocess.run([sys.executable, "notebook/checks.py", "ma_vision"], cwd=work, env=env,
+    r = subprocess.run([sys.executable, checks_path, "ma_vision"], cwd=work, env=env,
                        capture_output=True, text=True)
     green = "Tout est vert" in r.stdout
     print("checks.py ma_vision (fichier exporté) :", "✅ tout vert" if green else "❌\n" + r.stdout[-1200:])
