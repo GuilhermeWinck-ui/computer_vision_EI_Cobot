@@ -8,6 +8,8 @@ mes_reponses.py
 mes_reponses.py.tmp
 dist/
 .DS_Store
+# lock ppt 
+*.~lock*
 
 ##################################################
 # LATEX
